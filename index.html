@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="USDT账本">
+<meta name="theme-color" content="#f2f3f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1312" media="(prefers-color-scheme: dark)">
+<title>USDT 账本</title>
+<style>
+/* Layout: phone-first ledger — summary card, sticky filter bar, tappable rows grouped by day; tapping a row opens a bottom sheet for category + note */
+:root {
+  --bg: #f2f3f1;
+  --paper: #ffffff;
+  --ink: #1b2220;
+  --muted: #6a736f;
+  --line: #e1e5e2;
+  --accent: #1a6b5a;
+  --in: #1f7a4d;
+  --out: #b4432f;
+  --warn: #a86a00;
+  --chip: #eaeeeb;
+  --scrim: rgba(10, 14, 13, .45);
+  --focus: #2f5bd3;
+  --f-body: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  --f-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --bg: #0f1312; --paper: #191e1d; --ink: #e7ece9; --muted: #96a19c; --line: #2a3230;
+  --accent: #4fc3a6; --in: #5cc58f; --out: #ef8a73; --warn: #e2a945; --chip: #232a28; --scrim: rgba(0,0,0,.6); --focus: #7d9cf2;
+  color-scheme: dark } }
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent }
+html { -webkit-text-size-adjust: 100% }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.45;
+  padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px) }
+body.locked { overflow: hidden }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg) }
+[hidden] { display: none !important }
+.pad { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)) }
+.wrap { max-width: 720px; margin: 0 auto }
+h1 { font-size: 22px; margin: 0; font-weight: 700; letter-spacing: .01em }
+.muted { color: var(--muted) }
+.label { font-size: 11px; letter-spacing: .06em; color: var(--muted) }
+button, input, select, textarea { font: inherit; color: inherit }
+button { cursor: pointer; touch-action: manipulation }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px }
+
+header { padding-block: 16px 10px; display: grid; gap: 4px }
+.title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px }
+.icon-btn { min-width: 40px; min-height: 40px; border: 0; border-radius: 10px; background: var(--paper); display: inline-grid; place-items: center }
+.icon-btn svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round }
+.icon-btn.spin svg { animation: spin 1s linear infinite }
+@keyframes spin { to { transform: rotate(360deg) } }
+.sub-row { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); min-width: 0 }
+.sub-row .addr { font-family: var(--f-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0 }
+.sub-row .err { color: var(--out) }
+
+.banner { background: color-mix(in srgb, var(--warn) 14%, var(--paper)); color: var(--ink); border-radius: 12px; padding: 10px 12px; font-size: 13px; display: flex; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 12px }
+.banner button { border: 0; background: none; color: var(--accent); font-weight: 600; padding: 6px 0; white-space: nowrap }
+
+.summary { background: var(--paper); border-radius: 16px; padding: 16px; display: grid; gap: 12px; margin-bottom: 12px }
+.net { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap }
+.net .big { font-family: var(--f-mono); font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.01em }
+.split { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px }
+.split > * { background: var(--bg); border-radius: 10px; padding: 10px; display: grid; gap: 2px; min-width: 0; border: 0; text-align: left }
+.split b { font-family: var(--f-mono); font-size: 14px; letter-spacing: -.02em; font-weight: 500; font-variant-numeric: tabular-nums; overflow-wrap: anywhere }
+.split .todo[aria-pressed=true] { outline: 2px solid var(--accent); outline-offset: -2px }
+.pos { color: var(--in) } .neg { color: var(--out) }
+
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); padding-block: 8px; display: grid; gap: 8px }
+.bar-row { display: flex; gap: 8px; align-items: center }
+.month { appearance: none; -webkit-appearance: none; min-height: 38px; padding: 0 28px 0 12px; border: 0; border-radius: 10px; background: var(--paper) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23889' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 10px center; font-size: 15px; font-weight: 500 }
+.seg { flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); background: var(--chip); border-radius: 10px; padding: 2px }
+.seg button { border: 0; background: none; min-height: 34px; border-radius: 8px; font-size: 14px; color: var(--muted) }
+.seg button[aria-pressed=true] { background: var(--paper); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.08) }
+.search { flex: 1; min-width: 0; min-height: 38px; padding: 0 12px; border: 0; border-radius: 10px; background: var(--paper); font-size: 16px }
+.chipbtn { min-height: 38px; padding: 0 12px; border: 0; border-radius: 10px; background: var(--paper); font-size: 13px; color: var(--muted); white-space: nowrap }
+.chipbtn[aria-pressed=true] { background: var(--ink); color: var(--bg) }
+
+.day { padding: 14px 4px 6px; font-size: 12px; color: var(--muted); display: flex; justify-content: space-between }
+.group { background: var(--paper); border-radius: 14px; overflow: hidden }
+.row { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 12px 14px; border: 0; border-top: 1px solid var(--line); background: none; text-align: left; min-height: 64px; align-items: center }
+.row:first-child { border-top: 0 }
+.row:active { background: var(--chip) }
+.row-main { display: grid; gap: 3px; min-width: 0 }
+.row-top { display: flex; gap: 6px; align-items: center; min-width: 0 }
+.cat { font-size: 12px; padding: 1px 8px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); white-space: nowrap; font-weight: 500 }
+.cat.none { background: none; border: 1px dashed var(--line); color: var(--muted); font-weight: 400 }
+.pill { font-size: 11px; padding: 1px 6px; border-radius: 999px; white-space: nowrap; color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent) }
+.note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0 }
+.cp { font-family: var(--f-mono); font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.amt { text-align: right; font-family: var(--f-mono); font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap }
+.amt small { display: block; font-size: 11px; font-weight: 400; color: var(--muted) }
+.empty { background: var(--paper); border-radius: 14px; padding: 32px 20px; text-align: center; color: var(--muted); display: grid; gap: 6px; margin-top: 8px }
+.empty strong { color: var(--ink); font-weight: 600 }
+.foot { padding-block: 20px 32px; text-align: center; font-size: 12px; color: var(--muted) }
+
+.scrim { position: fixed; inset: 0; background: var(--scrim); z-index: 20; opacity: 0; pointer-events: none }
+.scrim.open { opacity: 1; pointer-events: auto }
+.sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 21; background: var(--paper); border-radius: 18px 18px 0 0;
+  max-height: 90dvh; overflow-y: auto; overscroll-behavior: contain; transform: translateY(105%); visibility: hidden;
+  padding-top: 8px; padding-bottom: max(16px, env(safe-area-inset-bottom, 0px)) }
+.sheet.open { transform: none; visibility: visible }
+.sheet-in { max-width: 720px; margin: 0 auto; display: grid; gap: 14px }
+.grab { width: 36px; height: 5px; border-radius: 3px; background: var(--line); margin: 0 auto 4px }
+.sh-title { font-size: 17px; font-weight: 600 }
+.sh-amt { font-family: var(--f-mono); font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums }
+.sh-meta { display: grid; gap: 4px; font-size: 13px; color: var(--muted) }
+.sh-meta .full { font-family: var(--f-mono); color: var(--ink); overflow-wrap: anywhere }
+.sh-meta a { color: var(--accent) }
+.cats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px }
+.cats button { min-height: 42px; border-radius: 10px; border: 0; background: var(--chip); font-size: 14px }
+.cats button[aria-pressed=true] { background: var(--accent); color: #fff; font-weight: 600 }
+.sheet textarea { width: 100%; min-height: 76px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); font-size: 16px; resize: vertical }
+.field { display: grid; gap: 6px }
+.field input { width: 100%; min-height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); font-size: 16px }
+.field input.mono { font-family: var(--f-mono); font-size: 14px }
+.status { font-size: 13px; color: var(--muted); min-height: 1em }
+.status.bad { color: var(--out) }
+.btn-row { display: flex; gap: 8px }
+.primary { flex: 1; min-height: 46px; border-radius: 12px; border: 0; background: var(--accent); color: #fff; font-weight: 600; font-size: 16px }
+.secondary { flex: 1; min-height: 46px; border-radius: 12px; border: 0; background: var(--chip); font-size: 16px }
+.list-btns { display: grid; gap: 8px }
+.list-btns button { min-height: 46px; border-radius: 12px; border: 0; background: var(--chip); font-size: 15px; text-align: left; padding: 0 14px; display: flex; justify-content: space-between; align-items: center }
+.list-btns small { color: var(--muted); font-size: 12px }
+hr { border: 0; border-top: 1px solid var(--line); margin: 2px 0 }
+
+@media (prefers-reduced-motion: no-preference) {
+  .scrim { transition: opacity .2s }
+  .sheet { transition: transform .28s cubic-bezier(.2,.8,.2,1), visibility .28s }
+}
+@media (min-width: 640px) { .cats { grid-template-columns: repeat(6, 1fr) } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="pad">
+    <div class="title-row">
+      <h1>USDT 账本</h1>
+      <div class="btn-row">
+        <button class="icon-btn" id="refreshBtn" type="button" aria-label="刷新交易">
+          <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>
+        </button>
+        <button class="icon-btn" id="settingsBtn" type="button" aria-label="设置与备份">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="sub-row"><span class="addr" id="addrText"></span><span id="syncText"></span></div>
+  </header>
+
+  <div class="pad">
+    <div class="banner" id="backupBanner" hidden>
+      <span id="backupText"></span>
+      <button type="button" id="bannerBackup">立即备份</button>
+    </div>
+    <section class="summary" id="summary" hidden>
+      <div class="net">
+        <span class="label" id="netLabel">USDT 净额</span>
+        <span class="big" id="netVal"></span>
+      </div>
+      <div class="split">
+        <div><span class="label">收入</span><b class="pos" id="inVal"></b></div>
+        <div><span class="label">支出</span><b class="neg" id="outVal"></b></div>
+        <button class="todo" type="button" id="todoBtn" aria-pressed="false"><span class="label">待备注</span><b id="todoVal"></b></button>
+      </div>
+    </section>
+  </div>
+
+  <div class="bar pad">
+    <div class="bar-row">
+      <select class="month" id="month" aria-label="月份"></select>
+      <div class="seg" role="group" aria-label="方向">
+        <button type="button" data-dir="all" aria-pressed="true">全部</button>
+        <button type="button" data-dir="in" aria-pressed="false">收入</button>
+        <button type="button" data-dir="out" aria-pressed="false">支出</button>
+      </div>
+    </div>
+    <div class="bar-row">
+      <input type="search" class="search" id="q" placeholder="搜索备注、地址、金额" aria-label="搜索" enterkeyhint="search">
+      <button type="button" class="chipbtn" id="dustBtn" aria-pressed="false">显示小额</button>
+    </div>
+  </div>
+
+  <main class="pad" id="journal">
+    <div class="empty"><strong>正在读取交易…</strong></div>
+  </main>
+
+  <div class="foot pad">只统计官方 USDT（TRC20）。小于 1 USDT 和仿冒币默认隐藏。<br>备注只保存在这台手机的浏览器里，请定期备份。</div>
+</div>
+
+<div class="scrim" id="scrim"></div>
+
+<section class="sheet pad" id="txSheet" role="dialog" aria-modal="true" aria-hidden="true" aria-label="编辑备注">
+  <div class="sheet-in">
+    <div class="grab"></div>
+    <div><div class="sh-amt" id="shAmt"></div><div class="sh-meta" id="shMeta"></div></div>
+    <div class="cats" id="cats" role="group" aria-label="分类"></div>
+    <textarea id="shNote" placeholder="写备注，例如：张三 10 月货款" enterkeyhint="done"></textarea>
+    <div class="btn-row">
+      <button class="secondary" type="button" id="shNext">保存，下一笔</button>
+      <button class="primary" type="button" id="shSave">保存</button>
+    </div>
+  </div>
+</section>
+
+<section class="sheet pad" id="setSheet" role="dialog" aria-modal="true" aria-hidden="true" aria-label="设置与备份">
+  <div class="sheet-in">
+    <div class="grab"></div>
+    <div class="sh-title">设置与备份</div>
+    <form id="setForm" class="sheet-in" style="gap:12px">
+      <label class="field"><span class="label">钱包地址（只填公开地址）</span>
+        <input id="addrInput" class="mono" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="T 开头 34 位"></label>
+      <label class="field"><span class="label">从哪天开始记账</span>
+        <input id="sinceInput" type="date"></label>
+      <div class="status" id="setStatus"></div>
+      <button class="primary" type="submit">保存设置</button>
+    </form>
+    <hr>
+    <div class="list-btns">
+      <button type="button" id="csvBtn">导出 CSV（给 Excel）<small>当前筛选的交易</small></button>
+      <button type="button" id="backupBtn">导出备份文件<small id="lastBackup"></small></button>
+      <button type="button" id="importBtn">从备份文件恢复<small>备注会合并，不会覆盖更新的</small></button>
+      <input type="file" id="importFile" accept=".json,application/json" hidden>
+    </div>
+    <div class="status" id="ioStatus"></div>
+    <button class="secondary" type="button" id="setClose">关闭</button>
+  </div>
+</section>
+
+<script>
+const USDT = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
+const API = "https://api.trongrid.io/v1/accounts/";
+const DEFAULT_ADDR = "TUXUFg6WhJVbyqu99qWVfBSzfRNu7wZNJw";
+const DEFAULT_SINCE = "2026-10-13";
+const CATS = ["收入", "支出", "工资", "货款", "退款", "自己转账", "交易所", "借出", "借入", "还款", "手续费", "其他"];
+const ADDR_RE = /^T[1-9A-HJ-NP-Za-km-z]{33}$/;
+const KEY = "usdtLedger.v1";
+const $ = (id) => document.getElementById(id);
+
+/* ---- storage ---- */
+function load() {
+  try { const s = JSON.parse(localStorage.getItem(KEY) || "null"); if (s && s.txs) return s; } catch (_) {}
+  return { address: DEFAULT_ADDR, since: DEFAULT_SINCE, txs: {}, notes: {}, lastSync: 0, lastBackup: 0 };
+}
+let store = load();
+let storageOk = true;
+function persist() {
+  try { localStorage.setItem(KEY, JSON.stringify(store)); storageOk = true; }
+  catch (_) { storageOk = false; }
+}
+try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (_) {}
+
+const ui = { month: "", dir: "all", onlyTodo: false, showDust: false, q: "", open: null, cat: "", syncing: false, error: "" };
+
+/* ---- formatting ---- */
+const tz = "Asia/Shanghai";
+const fmtDay = new Intl.DateTimeFormat("zh-CN", { timeZone: tz, month: "long", day: "numeric", weekday: "short" });
+const fmtTime = new Intl.DateTimeFormat("zh-CN", { timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false });
+const fmtFull = new Intl.DateTimeFormat("zh-CN", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
+const fmtSync = new Intl.DateTimeFormat("zh-CN", { timeZone: tz, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+const dayKey = (ts) => new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(ts);
+const num = (n) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+const num2 = (n) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const short = (a) => a ? a.slice(0, 6) + "…" + a.slice(-6) : "";
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+const sinceMs = () => new Date(store.since + "T00:00:00+08:00").getTime();
+const hasNote = (id) => { const n = store.notes[id]; return !!(n && (n.note || n.cat)); };
+const isFake = (t) => t.contract !== USDT;
+const isDust = (t) => isFake(t) || t.amount < 1;
+
+/* ---- fetch from TronGrid ---- */
+async function sync() {
+  if (ui.syncing || !ADDR_RE.test(store.address)) return;
+  ui.syncing = true; ui.error = ""; renderHeader();
+  const addr = store.address;
+  const latest = Object.values(store.txs).reduce((m, t) => Math.max(m, t.ts), 0);
+  const from = Math.max(sinceMs(), latest ? latest - 3600000 : 0);
+  let url = `${API}${addr}/transactions/trc20?only_confirmed=true&limit=200&contract_address=${USDT}&min_timestamp=${from}`;
+  try {
+    for (let page = 0; url && page < 50; page++) {
+      let res;
+      for (let tries = 0; ; tries++) {
+        res = await fetch(url);
+        if (res.status !== 429 || tries >= 2) break;
+        await new Promise((r) => setTimeout(r, 1500 * (tries + 1)));
+      }
+      if (!res.ok) throw new Error(res.status === 429 ? "接口太忙，请稍后再刷新" : "接口返回错误 " + res.status);
+      const body = await res.json();
+      if (store.address !== addr) return;
+      for (const t of body.data || []) {
+        if (t.type !== "Transfer") continue;
+        const info = t.token_info || {};
+        const incoming = t.to === addr;
+        store.txs[t.transaction_id] = {
+          ts: t.block_timestamp, dir: incoming ? "in" : "out", contract: info.address || "",
+          amount: Number(t.value) / 10 ** Number(info.decimals || 6), counterparty: incoming ? t.from : t.to,
+        };
+      }
+      url = body.meta && body.meta.links && body.meta.links.next;
+    }
+    store.lastSync = Date.now();
+    persist();
+  } catch (e) {
+    ui.error = e && e.message && !/fetch|network|load/i.test(e.message) ? e.message : "网络连不上波场接口，请检查网络后再刷新";
+  } finally {
+    ui.syncing = false;
+    render();
+  }
+}
+
+/* ---- data views ---- */
+function allTxs() {
+  const s = sinceMs(), out = [];
+  for (const [id, t] of Object.entries(store.txs)) if (t.ts >= s) out.push({ id, ...t });
+  return out.sort((a, b) => b.ts - a.ts);
+}
+const inMonth = (t) => !ui.month || dayKey(t.ts).slice(0, 7) === ui.month;
+function visible() {
+  const q = ui.q.trim().toLowerCase();
+  return allTxs().filter((t) => {
+    if (!inMonth(t)) return false;
+    if (ui.dir !== "all" && t.dir !== ui.dir) return false;
+    if (!ui.showDust && isDust(t)) return false;
+    if (ui.onlyTodo && hasNote(t.id)) return false;
+    const n = store.notes[t.id] || {};
+    if (q && ![t.counterparty, t.id, n.note, n.cat, String(t.amount)].some((s) => (s || "").toLowerCase().includes(q))) return false;
+    return true;
+  });
+}
+
+/* ---- render ---- */
+function renderHeader() {
+  $("addrText").textContent = store.address;
+  const st = $("syncText");
+  st.className = ui.error ? "err" : "";
+  st.textContent = ui.syncing ? "正在刷新…" : ui.error ? ui.error : store.lastSync ? "更新于 " + fmtSync.format(store.lastSync) : "";
+  $("refreshBtn").classList.toggle("spin", ui.syncing);
+  const noted = Object.values(store.notes).some((n) => n.note || n.cat);
+  const days = store.lastBackup ? Math.floor((Date.now() - store.lastBackup) / 864e5) : null;
+  const show = !storageOk || (noted && (days === null || days >= 7));
+  $("backupBanner").hidden = !show;
+  $("backupText").textContent = !storageOk ? "浏览器不让保存数据（可能是无痕模式），备注会丢失" : days === null ? "备注还没备份过" : `上次备份是 ${days} 天前`;
+}
+function renderMonths() {
+  const sel = $("month");
+  const keys = [...new Set(allTxs().map((t) => dayKey(t.ts).slice(0, 7)))].sort().reverse();
+  if (!ui.month && keys.length && sel.dataset.init !== "1") { ui.month = keys[0]; sel.dataset.init = "1"; }
+  if (ui.month && !keys.includes(ui.month)) ui.month = keys[0] || "";
+  const opts = keys.map((k) => `<option value="${k}">${k.slice(0, 4)}年${+k.slice(5)}月</option>`).join("") + `<option value="">全部</option>`;
+  if (sel.dataset.sig !== opts) { sel.innerHTML = opts; sel.dataset.sig = opts; }
+  sel.value = ui.month;
+}
+function renderSummary() {
+  const list = allTxs().filter((t) => inMonth(t) && !isDust(t));
+  $("summary").hidden = !list.length;
+  if (!list.length) return;
+  let i = 0, o = 0, todo = 0;
+  for (const t of list) { t.dir === "in" ? (i += t.amount) : (o += t.amount); if (!hasNote(t.id)) todo++; }
+  const net = i - o;
+  $("netLabel").textContent = `USDT 净额 · ${ui.month ? +ui.month.slice(5) + " 月" : "全部"}`;
+  $("netVal").innerHTML = `<span class="${net >= 0 ? "pos" : "neg"}">${net >= 0 ? "+" : "−"}${num2(Math.abs(net))}</span>`;
+  $("inVal").textContent = num2(i);
+  $("outVal").textContent = num2(o);
+  $("todoVal").textContent = `${todo} 笔`;
+  $("todoBtn").setAttribute("aria-pressed", String(ui.onlyTodo));
+}
+function rowHTML(t) {
+  const n = store.notes[t.id] || {};
+  const flag = isFake(t) ? `<span class="pill">仿冒</span>` : t.amount < 1 ? `<span class="pill">小额</span>` : "";
+  const cat = n.cat ? `<span class="cat">${esc(n.cat)}</span>` : `<span class="cat none">未分类</span>`;
+  const who = `<span class="cp">${t.dir === "in" ? "来自" : "转给"} ${short(t.counterparty)}</span>`;
+  return `<button class="row" type="button" data-id="${t.id}">
+    <span class="row-main"><span class="row-top">${cat}${flag}</span>${n.note ? `<span class="note">${esc(n.note)}</span>` : ""}${who}</span>
+    <span class="amt ${t.dir === "in" ? "pos" : "neg"}">${t.dir === "in" ? "+" : "−"}${num(t.amount)}<small>${fmtTime.format(t.ts)}</small></span>
+  </button>`;
+}
+function renderJournal() {
+  const j = $("journal"), list = visible();
+  if (!list.length) {
+    const any = allTxs().length;
+    j.innerHTML = `<div class="empty">${
+      !ADDR_RE.test(store.address) ? `<strong>还没设置钱包地址</strong><span>点右上角齿轮填写。</span>`
+      : ui.syncing && !any ? `<strong>正在读取交易…</strong><span>第一次打开需要几秒钟。</span>`
+      : !any ? `<strong>这段时间没有 USDT 转账</strong><span>点右上角刷新，或在设置里改开始日期。</span>`
+      : ui.onlyTodo ? `<strong>都备注完了</strong><span>点上方“待备注”可以看全部交易。</span>`
+      : `<strong>没有符合条件的交易</strong><span>换个月份，或点“显示小额”。</span>`}</div>`;
+    return;
+  }
+  const groups = [];
+  for (const t of list) {
+    const k = dayKey(t.ts), g = groups[groups.length - 1];
+    if (g && g.k === k) g.items.push(t); else groups.push({ k, ts: t.ts, items: [t] });
+  }
+  j.innerHTML = groups.map((g) => `<div class="day"><span>${fmtDay.format(g.ts)}</span><span>${g.items.length} 笔</span></div><div class="group">${g.items.map(rowHTML).join("")}</div>`).join("");
+}
+function render() { renderHeader(); renderMonths(); renderSummary(); renderJournal(); }
+
+/* ---- sheets ---- */
+let openSheetEl = null, scrollY = 0;
+function showSheet(el) {
+  if (!openSheetEl) { scrollY = window.scrollY; document.body.classList.add("locked"); }
+  if (openSheetEl && openSheetEl !== el) { openSheetEl.classList.remove("open"); openSheetEl.setAttribute("aria-hidden", "true"); }
+  openSheetEl = el;
+  $("scrim").classList.add("open"); el.classList.add("open"); el.setAttribute("aria-hidden", "false"); el.scrollTop = 0;
+}
+function hideSheet() {
+  if (!openSheetEl) return;
+  document.activeElement && document.activeElement.blur && document.activeElement.blur();
+  openSheetEl.classList.remove("open"); openSheetEl.setAttribute("aria-hidden", "true");
+  $("scrim").classList.remove("open"); document.body.classList.remove("locked");
+  openSheetEl = null; ui.open = null;
+  window.scrollTo(0, scrollY);
+}
+$("scrim").addEventListener("click", hideSheet);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideSheet(); });
+
+function openTx(id) {
+  const t = allTxs().find((x) => x.id === id); if (!t) return;
+  const n = store.notes[id] || {};
+  ui.open = id; ui.cat = n.cat || "";
+  $("shAmt").innerHTML = `<span class="${t.dir === "in" ? "pos" : "neg"}">${t.dir === "in" ? "+" : "−"}${num(t.amount)}</span> <span class="muted" style="font-size:14px;font-family:var(--f-body)">USDT</span>`;
+  $("shMeta").innerHTML = `<span>${fmtFull.format(t.ts)} · ${t.dir === "in" ? "收款，来自" : "付款，转给"}</span>
+    <span class="full">${t.counterparty}</span>
+    ${isFake(t) ? `<span class="neg">注意：合约不是官方 USDT，可能是仿冒币</span>` : ""}
+    <span><a href="https://tronscan.org/#/transaction/${t.id}" target="_blank" rel="noopener">在 Tronscan 查看</a></span>`;
+  renderCats();
+  $("shNote").value = n.note || "";
+  showSheet($("txSheet"));
+}
+function renderCats() {
+  $("cats").innerHTML = CATS.map((c) => `<button type="button" data-cat="${c}" aria-pressed="${c === ui.cat}">${c}</button>`).join("");
+}
+$("cats").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  ui.cat = ui.cat === b.dataset.cat ? "" : b.dataset.cat; renderCats();
+});
+function saveTx() {
+  const id = ui.open; if (!id) return;
+  const note = $("shNote").value.trim(), prev = store.notes[id] || {};
+  if ((prev.note || "") === note && (prev.cat || "") === ui.cat) return;
+  if (!note && !ui.cat) delete store.notes[id];
+  else store.notes[id] = { note, cat: ui.cat, updatedAt: Date.now() };
+  persist(); renderHeader(); renderSummary(); renderJournal();
+}
+$("shSave").addEventListener("click", () => { saveTx(); hideSheet(); });
+$("shNext").addEventListener("click", () => {
+  const cur = ui.open; saveTx();
+  const list = visible().filter((t) => !isDust(t));
+  const idx = list.findIndex((t) => t.id === cur);
+  const next = list.slice(idx + 1).concat(list.slice(0, Math.max(idx, 0))).find((t) => !hasNote(t.id) && t.id !== cur);
+  if (next) openTx(next.id); else hideSheet();
+});
+$("journal").addEventListener("click", (e) => { const r = e.target.closest(".row"); if (r) openTx(r.dataset.id); });
+
+/* ---- settings ---- */
+$("settingsBtn").addEventListener("click", () => {
+  $("addrInput").value = store.address; $("sinceInput").value = store.since;
+  $("setStatus").textContent = ""; $("ioStatus").textContent = "";
+  $("lastBackup").textContent = store.lastBackup ? "上次 " + fmtSync.format(store.lastBackup) : "还没备份过";
+  showSheet($("setSheet"));
+});
+$("setClose").addEventListener("click", hideSheet);
+$("setForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const a = $("addrInput").value.trim(), s = $("sinceInput").value, st = $("setStatus");
+  if (!ADDR_RE.test(a)) { st.textContent = "地址格式不对：应以 T 开头，共 34 位。"; st.className = "status bad"; return; }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) { st.textContent = "请选择开始日期。"; st.className = "status bad"; return; }
+  const changedAddr = a !== store.address, earlier = s < store.since;
+  store.address = a; store.since = s;
+  if (changedAddr || earlier) { store.txs = {}; store.lastSync = 0; }
+  persist(); ui.month = ""; $("month").dataset.init = "";
+  hideSheet(); render(); sync();
+});
+
+async function giveFile(name, text, type) {
+  const blob = new Blob([text], { type });
+  try {
+    const file = new File([blob], name, { type });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); return true; }
+  } catch (e) { if (e && e.name === "AbortError") return false; }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  return true;
+}
+const stamp = () => new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(Date.now());
+
+$("csvBtn").addEventListener("click", async () => {
+  const rows = [["时间(北京)", "方向", "金额(USDT)", "对方地址", "分类", "备注", "交易哈希"]];
+  for (const t of visible()) {
+    const n = store.notes[t.id] || {};
+    rows.push([fmtFull.format(t.ts), t.dir === "in" ? "收入" : "支出", (t.dir === "in" ? "" : "-") + t.amount, t.counterparty, n.cat || "", n.note || "", t.id]);
+  }
+  const csv = "﻿" + rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\r\n");
+  await giveFile(`USDT账本-${ui.month || "全部"}.csv`, csv, "text/csv");
+});
+$("backupBtn").addEventListener("click", async () => {
+  const data = JSON.stringify({ app: "usdt-ledger", version: 1, exportedAt: Date.now(), address: store.address, since: store.since, notes: store.notes });
+  if (await giveFile(`USDT账本备份-${stamp()}.json`, data, "application/json")) {
+    store.lastBackup = Date.now(); persist();
+    $("lastBackup").textContent = "上次 " + fmtSync.format(store.lastBackup);
+    $("ioStatus").textContent = "备份文件已生成。请存到“文件”App 或发给自己。"; $("ioStatus").className = "status";
+    renderHeader();
+  }
+});
+$("importBtn").addEventListener("click", () => $("importFile").click());
+$("bannerBackup").addEventListener("click", () => { $("settingsBtn").click(); });
+$("importFile").addEventListener("change", async (e) => {
+  const f = e.target.files && e.target.files[0]; e.target.value = "";
+  const st = $("ioStatus");
+  if (!f) return;
+  try {
+    const d = JSON.parse(await f.text());
+    if (!d || d.app !== "usdt-ledger" || typeof d.notes !== "object") throw 0;
+    let added = 0;
+    for (const [id, n] of Object.entries(d.notes)) {
+      const cur = store.notes[id];
+      if (!cur || (n.updatedAt || 0) > (cur.updatedAt || 0)) { store.notes[id] = n; added++; }
+    }
+    persist(); render();
+    st.textContent = `已恢复 ${added} 条备注。`; st.className = "status";
+  } catch (_) { st.textContent = "这个文件不是 USDT 账本的备份。"; st.className = "status bad"; }
+});
+
+/* ---- filters ---- */
+$("month").addEventListener("change", (e) => { ui.month = e.target.value; renderSummary(); renderJournal(); });
+document.querySelectorAll(".seg button").forEach((b) => b.addEventListener("click", () => {
+  ui.dir = b.dataset.dir;
+  document.querySelectorAll(".seg button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  renderJournal();
+}));
+$("todoBtn").addEventListener("click", () => { ui.onlyTodo = !ui.onlyTodo; renderSummary(); renderJournal(); });
+$("dustBtn").addEventListener("click", () => { ui.showDust = !ui.showDust; $("dustBtn").setAttribute("aria-pressed", String(ui.showDust)); renderJournal(); });
+let qt; $("q").addEventListener("input", (e) => { clearTimeout(qt); qt = setTimeout(() => { ui.q = e.target.value; renderJournal(); }, 200); });
+$("refreshBtn").addEventListener("click", sync);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && Date.now() - (store.lastSync || 0) > 5 * 60 * 1000) sync();
+});
+
+/* ---- boot ---- */
+persist();
+render();
+sync();
+</script>
+</body>
+</html>
